@@ -40,3 +40,21 @@ def test_get_user_not_found(client):
     """Getting a non-existent user returns 404."""
     response = client.get("/users/999")
     assert response.status_code == 404
+
+
+def test_create_user_empty_name_rejected(client):
+    """Creating a user with an empty name returns 422."""
+    response = client.post("/users/", json={"name": "", "email": "alice@example.com"})
+    assert response.status_code == 422
+
+
+def test_create_user_name_too_long_rejected(client):
+    """Creating a user with a name over 100 characters returns 422."""
+    response = client.post("/users/", json={"name": "a" * 101, "email": "alice@example.com"})
+    assert response.status_code == 422
+
+
+def test_create_user_invalid_email_rejected(client):
+    """Creating a user with an invalid email returns 422."""
+    response = client.post("/users/", json={"name": "Alice", "email": "not-an-email"})
+    assert response.status_code == 422

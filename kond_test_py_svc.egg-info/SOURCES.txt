@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+app/__init__.py
+app/database.py
+app/models.py
+app/schemas.py
+app/routes/__init__.py
+app/routes/tasks.py
+app/routes/users.py
+kond_test_py_svc.egg-info/PKG-INFO
+kond_test_py_svc.egg-info/SOURCES.txt
+kond_test_py_svc.egg-info/dependency_links.txt
+kond_test_py_svc.egg-info/requires.txt
+kond_test_py_svc.egg-info/top_level.txt
+tests/test_tasks.py
+tests/test_users.py
