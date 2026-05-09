@@ -11,6 +11,7 @@ router = APIRouter()
 
 
 def users_list(db: Session) -> list[User]:
+    """Return all users from the database."""
     return db.query(User).all()
 
 
