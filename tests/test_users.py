@@ -43,18 +43,27 @@ def test_get_user_not_found(client):
 
 
 def test_create_user_empty_name_rejected(client):
-    """Creating a user with an empty name returns 422."""
+    """Empty name returns 422."""
     response = client.post("/users/", json={"name": "", "email": "alice@example.com"})
     assert response.status_code == 422
 
 
 def test_create_user_name_too_long_rejected(client):
-    """Creating a user with a name over 100 characters returns 422."""
+    """Name over 100 characters returns 422."""
     response = client.post("/users/", json={"name": "a" * 101, "email": "alice@example.com"})
     assert response.status_code == 422
 
 
 def test_create_user_invalid_email_rejected(client):
-    """Creating a user with an invalid email returns 422."""
+    """Invalid email address returns 422."""
     response = client.post("/users/", json={"name": "Alice", "email": "not-an-email"})
     assert response.status_code == 422
+
+
+def test_create_user_valid_input_succeeds(client):
+    """Valid name and email returns 201."""
+    response = client.post("/users/", json={"name": "Bob", "email": "bob@example.com"})
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Bob"
+    assert data["email"] == "bob@example.com"
