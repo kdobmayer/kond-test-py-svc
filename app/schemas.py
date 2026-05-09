@@ -25,7 +25,6 @@ class TaskCreate(BaseModel):
 
     title: str
     description: str = ""
-    owner_id: int
 
 
 class TaskUpdate(BaseModel):

@@ -1,16 +1,38 @@
 """Test fixtures."""
 
+import os
+import time
+
 import pytest
 from fastapi.testclient import TestClient
+from jose import jwt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import create_app
 from app.database import Base, get_db
 
+TEST_JWT_SECRET = "testsecret"
+
+
 TEST_DATABASE_URL = "sqlite:///./test.db"
 test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestSession = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+
+@pytest.fixture(autouse=True)
+def set_jwt_secret():
+    """Set JWT_SECRET environment variable for all tests."""
+    os.environ["JWT_SECRET"] = TEST_JWT_SECRET
+    yield
+    os.environ.pop("JWT_SECRET", None)
+
+
+@pytest.fixture
+def valid_token() -> str:
+    """Return a valid JWT for alice@example.com signed with the test secret."""
+    payload = {"sub": "alice@example.com", "exp": int(time.time()) + 3600}
+    return jwt.encode(payload, TEST_JWT_SECRET, algorithm="HS256")
 
 
 @pytest.fixture(autouse=True)
