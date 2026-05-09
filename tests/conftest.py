@@ -1,46 +1,82 @@
-"""Test fixtures."""
-
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import pytest_asyncio
+from unittest.mock import patch
+from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from app import create_app
 from app.database import Base, get_db
+from app.main import app
 
-TEST_DATABASE_URL = "sqlite:///./test.db"
-test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-TestSession = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_payment_service.db"
+
+engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def override_get_db():
+    async with TestSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def setup_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    """Create tables before each test and drop after."""
-    Base.metadata.create_all(bind=test_engine)
-    yield
-    Base.metadata.drop_all(bind=test_engine)
+def patch_webhook_session():
+    """Patch async_session in webhook service to use test DB."""
+    with patch("app.services.webhooks.async_session", TestSessionLocal):
+        yield
 
 
-@pytest.fixture
-def db():
-    """Provide a test database session."""
-    session = TestSession()
-    try:
+@pytest_asyncio.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def db_session():
+    async with TestSessionLocal() as session:
         yield session
-    finally:
-        session.close()
 
 
-@pytest.fixture
-def client(db):
-    """Provide a test client with overridden DB dependency."""
-    application = create_app()
+@pytest_asyncio.fixture
+async def merchant(client: AsyncClient):
+    response = await client.post("/merchants", json={
+        "name": "Test Merchant",
+        "email": "test@merchant.com",
+        "currency": "USD",
+    })
+    return response.json()
 
-    def override_get_db():
-        try:
-            yield db
-        finally:
-            pass
 
-    application.dependency_overrides[get_db] = override_get_db
-    return TestClient(application)
+@pytest_asyncio.fixture
+async def payment(client: AsyncClient, merchant):
+    response = await client.post("/payments", json={
+        "merchant_id": merchant["id"],
+        "amount": 100.00,
+        "currency": "USD",
+        "description": "Test payment",
+    })
+    return response.json()
+
+
+@pytest_asyncio.fixture
+async def captured_payment(client: AsyncClient, payment):
+    response = await client.post(f"/payments/{payment['id']}/capture", json={})
+    return response.json()
