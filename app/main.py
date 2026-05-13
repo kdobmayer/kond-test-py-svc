@@ -1,8 +1,17 @@
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
+
 from fastapi import FastAPI
 
 from app.database import init_db
-from app.routers import merchants, payments, webhooks, reports
+from app.routers import merchants, payments, reports, webhooks
+
+
+def get_app_version() -> str:
+    try:
+        return version("payment-service")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 @asynccontextmanager
@@ -14,7 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Payment Processing Service",
     description="A payment processing API with merchant management, webhooks, and reporting",
-    version="0.1.0",
+    version=get_app_version(),
     lifespan=lifespan,
 )
 
@@ -22,6 +31,11 @@ app.include_router(merchants.router)
 app.include_router(payments.router)
 app.include_router(webhooks.router)
 app.include_router(reports.router)
+
+
+@app.get("/version")
+async def get_version():
+    return {"version": get_app_version()}
 
 
 @app.get("/health")
@@ -33,6 +47,6 @@ async def health_check():
 async def root():
     return {
         "service": "payment-processing",
-        "version": "0.1.0",
+        "version": get_app_version(),
         "docs": "/docs",
     }
