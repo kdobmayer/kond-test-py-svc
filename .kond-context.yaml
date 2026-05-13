@@ -1,0 +1,7 @@
+test: "pytest --cov=app"
+build: "uvicorn app.main:app --reload"
+files:
+  - path: app/main.py
+    why: "Modify existing /health endpoint and dynamically load version."
+  - path: tests/test_health.py
+    why: "Add new test file for the /health endpoint."
