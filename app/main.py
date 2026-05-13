@@ -24,6 +24,11 @@ app.include_router(webhooks.router)
 app.include_router(reports.router)
 
 
+@app.get("/ping")
+async def ping():
+    return {"ping": "pong"}
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
