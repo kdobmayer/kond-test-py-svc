@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Payment, PaymentStatus, Merchant, Refund, AuditLog
+from app.rate_limit import check_rate_limit, require_rate_limit
 from app.schemas import (
     PaymentCreate, PaymentCaptureRequest, PaymentResponse,
     PaymentListResponse, RefundCreate, RefundResponse,
@@ -19,6 +20,7 @@ async def create_payment(
     data: PaymentCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(require_rate_limit),
 ):
     # Check merchant exists and is active
     merchant_result = await db.execute(
@@ -27,8 +29,18 @@ async def create_payment(
     merchant = merchant_result.scalar_one_or_none()
     if not merchant:
         raise HTTPException(status_code=404, detail="Merchant not found")
+    if merchant.api_key != api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
     if not merchant.is_active:
         raise HTTPException(status_code=400, detail="Merchant is not active")
+
+    allowed, retry_after = await check_rate_limit(merchant.api_key)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     # Idempotency check
     if data.idempotency_key:

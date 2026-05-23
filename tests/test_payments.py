@@ -9,7 +9,7 @@ async def test_create_payment(client: AsyncClient, merchant):
         "amount": 50.00,
         "currency": "USD",
         "description": "Test payment",
-    })
+    }, headers={"X-API-Key": merchant["api_key"]})
     assert response.status_code == 201
     data = response.json()
     assert data["amount"] == 50.00
@@ -23,7 +23,7 @@ async def test_create_payment_invalid_merchant(client: AsyncClient):
         "merchant_id": "nonexistent",
         "amount": 50.00,
         "currency": "USD",
-    })
+    }, headers={"X-API-Key": "any-key"})
     assert response.status_code == 404
 
 
@@ -36,8 +36,18 @@ async def test_create_payment_inactive_merchant(client: AsyncClient, merchant):
         "merchant_id": merchant["id"],
         "amount": 50.00,
         "currency": "USD",
-    })
+    }, headers={"X-API-Key": merchant["api_key"]})
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_payment_invalid_api_key(client: AsyncClient, merchant):
+    response = await client.post("/payments", json={
+        "merchant_id": merchant["id"],
+        "amount": 50.00,
+        "currency": "USD",
+    }, headers={"X-API-Key": "pk_invalid"})
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -48,8 +58,9 @@ async def test_create_payment_idempotency(client: AsyncClient, merchant):
         "currency": "USD",
         "idempotency_key": "unique-key-123",
     }
-    response1 = await client.post("/payments", json=payload)
-    response2 = await client.post("/payments", json=payload)
+    headers = {"X-API-Key": merchant["api_key"]}
+    response1 = await client.post("/payments", json=payload, headers=headers)
+    response2 = await client.post("/payments", json=payload, headers=headers)
 
     assert response1.status_code == 201
     assert response2.status_code == 201
@@ -62,7 +73,7 @@ async def test_create_payment_invalid_amount(client: AsyncClient, merchant):
         "merchant_id": merchant["id"],
         "amount": -10.00,
         "currency": "USD",
-    })
+    }, headers={"X-API-Key": merchant["api_key"]})
     assert response.status_code == 422
 
 
@@ -72,7 +83,7 @@ async def test_create_payment_invalid_currency(client: AsyncClient, merchant):
         "merchant_id": merchant["id"],
         "amount": 50.00,
         "currency": "XYZ",
-    })
+    }, headers={"X-API-Key": merchant["api_key"]})
     assert response.status_code == 422
 
 
