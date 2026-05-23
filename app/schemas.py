@@ -245,3 +245,11 @@ class SettlementReport(BaseModel):
 class SettlementListResponse(BaseModel):
     settlements: list[SettlementReport]
     total: int
+
+
+# --- Metrics Schema ---
+
+class MetricsResponse(BaseModel):
+    total_payments: int
+    total_merchants: int
+    total_webhooks_delivered: int
