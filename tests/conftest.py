@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from app.database import Base, get_db
 from app.main import app
+from app import rate_limit
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///./test_payment_service.db"
 
@@ -42,6 +43,13 @@ def patch_webhook_session():
         yield
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limit():
+    rate_limit.clear_rate_limit_state()
+    yield
+    rate_limit.clear_rate_limit_state()
+
+
 @pytest_asyncio.fixture
 async def client():
     transport = ASGITransport(app=app)
@@ -72,7 +80,7 @@ async def payment(client: AsyncClient, merchant):
         "amount": 100.00,
         "currency": "USD",
         "description": "Test payment",
-    })
+    }, headers={"X-API-Key": merchant["api_key"]})
     return response.json()
 
 
