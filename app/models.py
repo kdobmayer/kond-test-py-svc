@@ -15,6 +15,13 @@ def gen_uuid():
     return str(uuid.uuid4())
 
 
+class DisputeStatus(str, enum.Enum):
+    OPEN = "open"
+    UNDER_REVIEW = "under_review"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
 class PaymentStatus(str, enum.Enum):
     PENDING = "pending"
     AUTHORIZED = "authorized"
@@ -57,6 +64,7 @@ class Merchant(Base):
     payments = relationship("Payment", back_populates="merchant")
     webhook_endpoints = relationship("WebhookEndpoint", back_populates="merchant")
     settlements = relationship("Settlement", back_populates="merchant")
+    disputes = relationship("Dispute", back_populates="merchant")
 
 
 class Payment(Base):
@@ -79,6 +87,7 @@ class Payment(Base):
 
     merchant = relationship("Merchant", back_populates="payments")
     refunds = relationship("Refund", back_populates="payment")
+    disputes = relationship("Dispute", back_populates="payment")
 
 
 class Refund(Base):
@@ -154,3 +163,23 @@ class AuditLog(Base):
     action = Column(String(50), nullable=False)
     details = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+
+class Dispute(Base):
+    __tablename__ = "disputes"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    payment_id = Column(String, ForeignKey("payments.id"), nullable=False)
+    merchant_id = Column(String, ForeignKey("merchants.id"), nullable=False)
+    reason = Column(Text, nullable=False)
+    evidence = Column(Text, nullable=True)
+    amount = Column(Float, nullable=False)
+    status = Column(SAEnum(DisputeStatus), default=DisputeStatus.OPEN)
+    resolution_note = Column(Text, nullable=True)
+    refund_id = Column(String, ForeignKey("refunds.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    payment = relationship("Payment", back_populates="disputes")
+    merchant = relationship("Merchant", back_populates="disputes")
+    refund = relationship("Refund", foreign_keys=[refund_id])
