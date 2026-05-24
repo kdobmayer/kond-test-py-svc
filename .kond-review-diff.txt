@@ -1,89 +1,153 @@
- app/services/analytics.py | 80 +++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 80 insertions(+)
+ app/main.py              |   3 +-
+ app/routers/analytics.py | 122 +++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 124 insertions(+), 1 deletion(-)
 
-diff --git a/app/services/analytics.py b/app/services/analytics.py
+diff --git a/app/main.py b/app/main.py
+index ccaa21e..a66751c 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
+ from fastapi import FastAPI
+ 
+ from app.database import init_db
+-from app.routers import merchants, payments, webhooks, reports
++from app.routers import merchants, payments, webhooks, reports, analytics
+ 
+ 
+ @asynccontextmanager
+@@ -22,6 +22,7 @@ app.include_router(merchants.router)
+ app.include_router(payments.router)
+ app.include_router(webhooks.router)
+ app.include_router(reports.router)
++app.include_router(analytics.router)
+ 
+ 
+ @app.get("/health")
+diff --git a/app/routers/analytics.py b/app/routers/analytics.py
 new file mode 100644
-index 0000000..df45680
+index 0000000..fb66e92
 --- /dev/null
-+++ b/app/services/analytics.py
-@@ -0,0 +1,80 @@
-+from collections import defaultdict
-+from typing import Optional
++++ b/app/routers/analytics.py
+@@ -0,0 +1,122 @@
++from datetime import datetime, timezone, timedelta
 +
-+from app.models import Payment, PaymentStatus
++from fastapi import APIRouter, Depends, HTTPException, Query
++from sqlalchemy import select, and_
++from sqlalchemy.ext.asyncio import AsyncSession
 +
++from app.database import get_db
++from app.models import Merchant, Payment
++from app.schemas import (
++    AnalyticsDailyResponse,
++    AnalyticsDailyPoint,
++    AnalyticsSummary,
++    AnalyticsChange,
++    AnalyticsTrendsResponse,
++)
++from app.services.analytics import aggregate_daily, summarize, compare_periods
 +
-+_SUCCESS_STATUSES = {PaymentStatus.CAPTURED, PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED}
-+
-+_METRIC_FIELDS = {
-+    "count": "total_count",
-+    "volume": "total_volume",
-+    "average": "average_payment",
-+    "success_rate": "success_rate",
-+}
-+
-+
-+def aggregate_daily(payments: list[Payment]) -> list[dict]:
-+    groups: dict[str, list[Payment]] = defaultdict(list)
-+    for p in payments:
-+        groups[p.created_at.strftime("%Y-%m-%d")].append(p)
-+
-+    result = []
-+    for date_str in sorted(groups):
-+        day = groups[date_str]
-+        count = len(day)
-+        volume = round(sum(p.amount for p in day), 2)
-+        result.append({
-+            "date": date_str,
-+            "count": count,
-+            "volume": volume,
-+            "average": round(volume / count, 2),
-+            "success_rate": round(sum(1 for p in day if p.status in _SUCCESS_STATUSES) / count, 4),
-+            "refund_rate": round(sum(1 for p in day if p.refunded_amount > 0) / count, 4),
-+        })
-+    return result
++router = APIRouter(prefix="/analytics", tags=["analytics"])
 +
 +
-+def summarize(payments: list[Payment]) -> dict:
-+    if not payments:
-+        return {
-+            "total_count": 0,
-+            "total_volume": 0.0,
-+            "captured_amount": 0.0,
-+            "refunded_amount": 0.0,
-+            "average_payment": 0.0,
-+            "success_rate": 0.0,
-+            "refund_rate": 0.0,
-+            "unique_customers": 0,
-+        }
-+
-+    count = len(payments)
-+    total_volume = round(sum(p.amount for p in payments), 2)
-+    return {
-+        "total_count": count,
-+        "total_volume": total_volume,
-+        "captured_amount": round(sum(p.captured_amount for p in payments), 2),
-+        "refunded_amount": round(sum(p.refunded_amount for p in payments), 2),
-+        "average_payment": round(total_volume / count, 2),
-+        "success_rate": round(sum(1 for p in payments if p.status in _SUCCESS_STATUSES) / count, 4),
-+        "refund_rate": round(sum(1 for p in payments if p.refunded_amount > 0) / count, 4),
-+        "unique_customers": len({p.customer_email for p in payments if p.customer_email is not None}),
-+    }
++async def _get_merchant_or_404(merchant_id: str, db: AsyncSession) -> Merchant:
++    result = await db.execute(select(Merchant).where(Merchant.id == merchant_id))
++    merchant = result.scalar_one_or_none()
++    if not merchant:
++        raise HTTPException(status_code=404, detail="Merchant not found")
++    return merchant
 +
 +
-+def pct_change(current: float, previous: float) -> Optional[float]:
-+    if previous == 0:
-+        return None
-+    return round((current - previous) / previous, 4)
++async def _fetch_payments(
++    merchant_id: str,
++    period_start: datetime,
++    period_end: datetime,
++    db: AsyncSession,
++) -> list[Payment]:
++    result = await db.execute(
++        select(Payment).where(
++            and_(
++                Payment.merchant_id == merchant_id,
++                Payment.created_at >= period_start,
++                Payment.created_at <= period_end,
++            )
++        )
++    )
++    return result.scalars().all()
 +
 +
-+def compare_periods(current_payments: list[Payment], previous_payments: list[Payment]) -> dict:
-+    curr = summarize(current_payments)
-+    prev = summarize(previous_payments)
-+    return {
-+        key: {
-+            "absolute": curr[field] - prev[field],
-+            "percentage": pct_change(curr[field], prev[field]),
-+        }
-+        for key, field in _METRIC_FIELDS.items()
-+    }
++@router.get("/daily/{merchant_id}", response_model=AnalyticsDailyResponse)
++async def get_analytics_daily(
++    merchant_id: str,
++    days: int = Query(30, ge=1, le=365),
++    db: AsyncSession = Depends(get_db),
++):
++    merchant = await _get_merchant_or_404(merchant_id, db)
++    period_end = datetime.now(timezone.utc)
++    period_start = period_end - timedelta(days=days)
++    payments = await _fetch_payments(merchant_id, period_start, period_end, db)
++    daily_points = [AnalyticsDailyPoint(**point) for point in aggregate_daily(payments)]
++    return AnalyticsDailyResponse(
++        merchant_id=merchant_id,
++        period_start=period_start,
++        period_end=period_end,
++        currency=merchant.currency,
++        days=daily_points,
++    )
++
++
++@router.get("/summary/{merchant_id}", response_model=AnalyticsSummary)
++async def get_analytics_summary(
++    merchant_id: str,
++    days: int = Query(30, ge=1, le=365),
++    db: AsyncSession = Depends(get_db),
++):
++    merchant = await _get_merchant_or_404(merchant_id, db)
++    period_end = datetime.now(timezone.utc)
++    period_start = period_end - timedelta(days=days)
++    payments = await _fetch_payments(merchant_id, period_start, period_end, db)
++    stats = summarize(payments)
++    return AnalyticsSummary(
++        merchant_id=merchant_id,
++        period_start=period_start,
++        period_end=period_end,
++        currency=merchant.currency,
++        **stats,
++    )
++
++
++@router.get("/trends/{merchant_id}", response_model=AnalyticsTrendsResponse)
++async def get_analytics_trends(
++    merchant_id: str,
++    days: int = Query(30, ge=1, le=365),
++    db: AsyncSession = Depends(get_db),
++):
++    merchant = await _get_merchant_or_404(merchant_id, db)
++    period_end = datetime.now(timezone.utc)
++    period_start = period_end - timedelta(days=days)
++    previous_start = period_start - timedelta(days=days)
++
++    current_payments = await _fetch_payments(merchant_id, period_start, period_end, db)
++    previous_payments = await _fetch_payments(merchant_id, previous_start, period_start, db)
++
++    current_stats = summarize(current_payments)
++    previous_stats = summarize(previous_payments)
++    changes_raw = compare_periods(current_payments, previous_payments)
++
++    return AnalyticsTrendsResponse(
++        merchant_id=merchant_id,
++        current=AnalyticsSummary(
++            merchant_id=merchant_id,
++            period_start=period_start,
++            period_end=period_end,
++            currency=merchant.currency,
++            **current_stats,
++        ),
++        previous=AnalyticsSummary(
++            merchant_id=merchant_id,
++            period_start=previous_start,
++            period_end=period_start,
++            currency=merchant.currency,
++            **previous_stats,
++        ),
++        changes={k: AnalyticsChange(**v) for k, v in changes_raw.items()},
++    )

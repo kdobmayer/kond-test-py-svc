@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.database import init_db
-from app.routers import merchants, payments, webhooks, reports
+from app.routers import merchants, payments, webhooks, reports, analytics
 
 
 @asynccontextmanager
@@ -22,6 +22,7 @@ app.include_router(merchants.router)
 app.include_router(payments.router)
 app.include_router(webhooks.router)
 app.include_router(reports.router)
+app.include_router(analytics.router)
 
 
 @app.get("/health")
