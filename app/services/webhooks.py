@@ -1,8 +1,8 @@
 import hashlib
 import hmac
 import json
-import time
 from datetime import datetime, timezone
+from json import JSONDecodeError
 
 import httpx
 from sqlalchemy import select
@@ -34,8 +34,8 @@ def verify_signature(payload: str, signature: str, secret: str) -> bool:
 async def dispatch_webhook_event(
     merchant_id: str,
     event_type: str,
-    payload: dict,
-):
+    payload: dict[str, object],
+) -> None:
     """Dispatch webhook event to all registered endpoints for a merchant.
 
     This is called as a background task after payment events.
@@ -50,8 +50,11 @@ async def dispatch_webhook_event(
         endpoints = result.scalars().all()
 
         for endpoint in endpoints:
-            # Check if endpoint is subscribed to this event type
-            subscribed_events = json.loads(endpoint.events)
+            try:
+                subscribed_events = _parse_subscribed_events(endpoint.events)
+            except ValueError:
+                continue
+
             if event_type not in subscribed_events:
                 continue
 
@@ -70,8 +73,12 @@ async def dispatch_webhook_event(
             db.add(delivery)
             await db.flush()
 
-            # Attempt delivery (no tests for this — intentional rough edge)
-            await _attempt_delivery(db, delivery, endpoint)
+            try:
+                await _attempt_delivery(db, delivery, endpoint)
+            except Exception:
+                delivery.status = DeliveryStatus.FAILED
+                delivery.response_code = None
+                await db.flush()
 
         await db.commit()
 
@@ -80,7 +87,7 @@ async def _attempt_delivery(
     db: AsyncSession,
     delivery: WebhookDelivery,
     endpoint: WebhookEndpoint,
-):
+) -> None:
     """Attempt to deliver a webhook. Retries up to 3 times with backoff."""
     max_attempts = 3
 
@@ -111,7 +118,11 @@ async def _attempt_delivery(
                 delivery.delivered_at = datetime.now(timezone.utc)
                 await db.flush()
                 return
-        except (httpx.RequestError, httpx.TimeoutException):
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                delivery.status = DeliveryStatus.FAILED
+                await db.flush()
+                return
+        except httpx.HTTPError:
             delivery.response_code = None
 
         # Backoff before retry
@@ -122,7 +133,20 @@ async def _attempt_delivery(
     await db.flush()
 
 
-async def _async_sleep(seconds: float):
+async def _async_sleep(seconds: float) -> None:
     """Async sleep wrapper for testability."""
     import asyncio
     await asyncio.sleep(seconds)
+
+
+def _parse_subscribed_events(events_raw: str) -> list[str]:
+    """Validate stored endpoint subscriptions before dispatch."""
+    try:
+        parsed = json.loads(events_raw)
+    except (TypeError, JSONDecodeError) as exc:
+        raise ValueError("Invalid webhook endpoint events payload") from exc
+
+    if not isinstance(parsed, list) or not all(isinstance(event, str) for event in parsed):
+        raise ValueError("Invalid webhook endpoint events payload")
+
+    return parsed
