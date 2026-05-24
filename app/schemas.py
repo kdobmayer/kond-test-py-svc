@@ -245,3 +245,49 @@ class SettlementReport(BaseModel):
 class SettlementListResponse(BaseModel):
     settlements: list[SettlementReport]
     total: int
+
+
+# --- Analytics Schemas ---
+
+class AnalyticsDailyPoint(BaseModel):
+    date: str
+    count: int
+    volume: float
+    average: float
+    success_rate: float
+    refund_rate: float
+
+
+class AnalyticsDailyResponse(BaseModel):
+    merchant_id: str
+    period_start: datetime
+    period_end: datetime
+    currency: str
+    days: list[AnalyticsDailyPoint]
+
+
+class AnalyticsSummary(BaseModel):
+    merchant_id: str
+    period_start: datetime
+    period_end: datetime
+    currency: str
+    total_count: int
+    total_volume: float
+    captured_amount: float
+    refunded_amount: float
+    average_payment: float
+    success_rate: float
+    refund_rate: float
+    unique_customers: int
+
+
+class AnalyticsChange(BaseModel):
+    absolute: float
+    percentage: Optional[float] = None
+
+
+class AnalyticsTrendsResponse(BaseModel):
+    merchant_id: str
+    current: AnalyticsSummary
+    previous: AnalyticsSummary
+    changes: dict[str, AnalyticsChange]
