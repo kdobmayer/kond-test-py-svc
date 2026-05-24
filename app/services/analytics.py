@@ -1,0 +1,80 @@
+from collections import defaultdict
+from typing import Optional
+
+from app.models import Payment, PaymentStatus
+
+
+_SUCCESS_STATUSES = {PaymentStatus.CAPTURED, PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED}
+
+_METRIC_FIELDS = {
+    "count": "total_count",
+    "volume": "total_volume",
+    "average": "average_payment",
+    "success_rate": "success_rate",
+}
+
+
+def aggregate_daily(payments: list[Payment]) -> list[dict]:
+    groups: dict[str, list[Payment]] = defaultdict(list)
+    for p in payments:
+        groups[p.created_at.strftime("%Y-%m-%d")].append(p)
+
+    result = []
+    for date_str in sorted(groups):
+        day = groups[date_str]
+        count = len(day)
+        volume = round(sum(p.amount for p in day), 2)
+        result.append({
+            "date": date_str,
+            "count": count,
+            "volume": volume,
+            "average": round(volume / count, 2),
+            "success_rate": round(sum(1 for p in day if p.status in _SUCCESS_STATUSES) / count, 4),
+            "refund_rate": round(sum(1 for p in day if p.refunded_amount > 0) / count, 4),
+        })
+    return result
+
+
+def summarize(payments: list[Payment]) -> dict:
+    if not payments:
+        return {
+            "total_count": 0,
+            "total_volume": 0.0,
+            "captured_amount": 0.0,
+            "refunded_amount": 0.0,
+            "average_payment": 0.0,
+            "success_rate": 0.0,
+            "refund_rate": 0.0,
+            "unique_customers": 0,
+        }
+
+    count = len(payments)
+    total_volume = round(sum(p.amount for p in payments), 2)
+    return {
+        "total_count": count,
+        "total_volume": total_volume,
+        "captured_amount": round(sum(p.captured_amount for p in payments), 2),
+        "refunded_amount": round(sum(p.refunded_amount for p in payments), 2),
+        "average_payment": round(total_volume / count, 2),
+        "success_rate": round(sum(1 for p in payments if p.status in _SUCCESS_STATUSES) / count, 4),
+        "refund_rate": round(sum(1 for p in payments if p.refunded_amount > 0) / count, 4),
+        "unique_customers": len({p.customer_email for p in payments if p.customer_email is not None}),
+    }
+
+
+def pct_change(current: float, previous: float) -> Optional[float]:
+    if previous == 0:
+        return None
+    return round((current - previous) / previous, 4)
+
+
+def compare_periods(current_payments: list[Payment], previous_payments: list[Payment]) -> dict:
+    curr = summarize(current_payments)
+    prev = summarize(previous_payments)
+    return {
+        key: {
+            "absolute": curr[field] - prev[field],
+            "percentage": pct_change(curr[field], prev[field]),
+        }
+        for key, field in _METRIC_FIELDS.items()
+    }
