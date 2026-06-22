@@ -1,0 +1,28 @@
+{
+  "name": "kond-test-py-svc",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "containerEnv": {
+    "PYTHONPATH": "/pvc/workspace"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.autopep8"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/python/current/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.autopep8"
+        }
+      }
+    }
+  }
+}
