@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from app.models import DisputeStatus
 
 
 # --- Merchant Schemas ---
@@ -244,4 +245,52 @@ class SettlementReport(BaseModel):
 
 class SettlementListResponse(BaseModel):
     settlements: list[SettlementReport]
+    total: int
+
+
+# --- Dispute Schemas ---
+
+class DisputeCreate(BaseModel):
+    reason: str = Field(..., min_length=1)
+    evidence: Optional[str] = None
+    amount: Optional[float] = Field(None, gt=0, le=999999.99)
+
+    @field_validator("amount")
+    @classmethod
+    def validate_amount(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and round(v, 2) != v:
+            raise ValueError("Amount must have at most 2 decimal places")
+        return v
+
+
+class DisputeResolve(BaseModel):
+    resolution: DisputeStatus
+    resolution_note: Optional[str] = None
+
+    @field_validator("resolution")
+    @classmethod
+    def validate_resolution(cls, v: DisputeStatus) -> DisputeStatus:
+        if v not in {DisputeStatus.ACCEPTED, DisputeStatus.REJECTED}:
+            raise ValueError("Resolution must be accepted or rejected")
+        return v
+
+
+class DisputeResponse(BaseModel):
+    id: str
+    payment_id: str
+    merchant_id: str
+    reason: str
+    evidence: Optional[str]
+    amount: float
+    status: str
+    resolution_note: Optional[str]
+    refund_id: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DisputeListResponse(BaseModel):
+    disputes: list[DisputeResponse]
     total: int

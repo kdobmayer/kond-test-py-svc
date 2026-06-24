@@ -4,8 +4,9 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Payment, PaymentStatus, Merchant, Refund, AuditLog
+from app.models import Dispute, DisputeStatus, Payment, PaymentStatus, Merchant, Refund, AuditLog
 from app.schemas import (
+    DisputeCreate, DisputeResponse,
     PaymentCreate, PaymentCaptureRequest, PaymentResponse,
     PaymentListResponse, RefundCreate, RefundResponse,
 )
@@ -284,3 +285,62 @@ async def list_refunds(payment_id: str, db: AsyncSession = Depends(get_db)):
         select(Refund).where(Refund.payment_id == payment_id).order_by(Refund.created_at.desc())
     )
     return refunds_result.scalars().all()
+
+
+@router.post("/{payment_id}/dispute", response_model=DisputeResponse, status_code=201)
+async def create_dispute(
+    payment_id: str,
+    data: DisputeCreate,
+    db: AsyncSession = Depends(get_db),
+) -> DisputeResponse:
+    result = await db.execute(select(Payment).where(Payment.id == payment_id))
+    payment = result.scalar_one_or_none()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    if payment.status not in (PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot dispute payment in status '{payment.status.value}'"
+        )
+
+    existing_result = await db.execute(
+        select(Dispute).where(
+            Dispute.payment_id == payment_id,
+            Dispute.status.in_([DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW]),
+        )
+    )
+    if existing_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Payment already has an active dispute")
+
+    available = round(payment.captured_amount - payment.refunded_amount, 2)
+    dispute_amount = data.amount if data.amount is not None else available
+
+    if dispute_amount > available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dispute amount {dispute_amount} exceeds available {available}"
+        )
+    if dispute_amount <= 0:
+        raise HTTPException(status_code=400, detail="No captured amount available to dispute")
+
+    dispute = Dispute(
+        payment_id=payment_id,
+        merchant_id=payment.merchant_id,
+        reason=data.reason,
+        evidence=data.evidence,
+        amount=dispute_amount,
+    )
+    db.add(dispute)
+    await db.flush()
+
+    audit = AuditLog(
+        entity_type="dispute",
+        entity_id=dispute.id,
+        action="created",
+        details=f"Dispute created for payment {payment_id}. Reason: {data.reason}",
+    )
+    db.add(audit)
+    await db.flush()
+
+    return dispute
